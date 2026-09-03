@@ -53,6 +53,8 @@ const SEC_COLS = [0, 15, 30, 45];
 const AUTOSAVE_MS = 2 * 60 * 1000; // every 2 minutes
 const DRAFT_KEY = "draft";
 const INDEX_KEY = "sessions-index";
+const SITE_IDENTITY_KEY = "site-identity";
+const SITE_IDENTITY_FIELDS = ["company", "facilityName", "streetAddress", "city", "state", "zip"];
 
 const emptyHeader = {
   methodUsed: "Method 9",
@@ -604,6 +606,19 @@ function Method9App() {
         } catch (e) {
           /* ignore corrupt draft */
         }
+      } else {
+        // No unsaved work to restore — still worth pre-filling the site identity
+        // fields (company/facility/address) from whatever was last used, so a
+        // brand-new reading doesn't start from a completely blank form.
+        const siteRaw = await storageGet(SITE_IDENTITY_KEY);
+        if (siteRaw) {
+          try {
+            const site = JSON.parse(siteRaw);
+            setHeader((h) => ({ ...h, ...site }));
+          } catch (e) {
+            /* ignore corrupt site identity */
+          }
+        }
       }
       const idxRaw = await storageGet(INDEX_KEY);
       if (idxRaw) {
@@ -951,6 +966,14 @@ function Method9App() {
     });
     const ok = await storageSet(DRAFT_KEY, payload);
     if (ok) setStatus(`Backed up automatically at ${nowLabel()}`);
+
+    const siteIdentity = {};
+    SITE_IDENTITY_FIELDS.forEach((key) => {
+      siteIdentity[key] = s.header[key] || "";
+    });
+    if (Object.values(siteIdentity).some((v) => v)) {
+      storageSet(SITE_IDENTITY_KEY, JSON.stringify(siteIdentity));
+    }
   }, []);
 
   // mark dirty on any edit, and also opportunistically backup on field blur handled elsewhere
@@ -1214,11 +1237,20 @@ function Method9App() {
     }
   };
 
-  const startNew = () => {
+  const startNew = async () => {
     if (dirty && !window.confirm("Start a new reading? Anything unsaved will be lost from view (a backup copy stays in Restore).")) {
       return;
     }
-    setHeader(emptyHeader);
+    let nextHeader = emptyHeader;
+    const siteRaw = await storageGet(SITE_IDENTITY_KEY);
+    if (siteRaw) {
+      try {
+        nextHeader = { ...emptyHeader, ...JSON.parse(siteRaw) };
+      } catch (e) {
+        /* ignore corrupt site identity, fall back to blank */
+      }
+    }
+    setHeader(nextHeader);
     setDuration(30);
     setRows(makeBlankRows(30));
     setComments(makeBlankComments(30));
@@ -1226,7 +1258,7 @@ function Method9App() {
     setSessionId(null);
     setSessionLabel("");
     setDirty(false);
-    setStatus("Started a new blank reading");
+    setStatus("Started a new reading — site info carried over");
     handleStopwatchReset();
   };
 
@@ -1997,168 +2029,209 @@ function Method9App() {
         </div>
 
         {/* ---------- Dedicated print-only layout — mirrors the real two-column paper form exactly, independent of the editable mobile layout above ---------- */}
-        <div className="m9-printdoc" style={{ display: "none" }}>
-          <div style={{ textAlign: "center", fontWeight: 700, fontSize: 9, marginBottom: 3 }}>
-            EPA VISIBLE EMISSION OBSERVATION FORM 1
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "48% 50%", columnGap: "2%" }}>
-            {/* LEFT COLUMN */}
-            <div>
-              <div style={{ fontSize: 6.5, marginBottom: 2 }}>
-                <b>Method Used (Circle One):</b>{" "}
-                {["Method 9", "203A", "203B", "Other"].map((opt) => (
-                  <span
-                    key={opt}
-                    style={{
-                      marginRight: 6,
-                      textDecoration: header.methodUsed === opt ? "underline" : "none",
-                      fontWeight: header.methodUsed === opt ? 700 : 400,
-                    }}
-                  >
-                    {opt}
-                  </span>
-                ))}
-              </div>
-              <PrintField label="Company Name" value={header.company} />
-              <PrintField label="Facility Name" value={header.facilityName} />
-              <PrintField label="Street Address" value={header.streetAddress} />
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="City" value={header.city} />
-                <PrintField label="State" value={header.state} />
-                <PrintField label="Zip" value={header.zip} />
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="Process" value={header.processEquip} />
-                <PrintField label="Unit #" value={header.unitNumber} />
-                <PrintField label="Op. Mode" value={header.processMode} />
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="Control Equip." value={header.controlEquip} />
-                <PrintField label="Op. Mode" value={header.controlMode} />
-              </div>
-              <PrintField label="Describe Emission Point" value={header.emissionPointDesc} />
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="Height Emiss. Pt (ft)" value={header.heightEmissionPoint} />
-                <PrintField label="Height Rel. Observer (ft)" value={header.heightRelativeObserver} />
-              </div>
-              <PrintStartEnd label="Distance to Emiss. Pt." unit="ft" start={header.distEmissionStart} end={header.distEmissionEnd} />
-              <PrintStartEnd label="Direction to Emiss. Pt." unit="0–360°" start={header.dirEmissionStart} end={header.dirEmissionEnd} />
-              <PrintStartEnd label="Vertical Angle to Obs. Pt." unit="°" start={header.vertAngleStart} end={header.vertAngleEnd} />
-              <PrintStartEnd label="Direction to Obs. Pt." unit="0–360°" start={header.dirObsPointStart} end={header.dirObsPointEnd} />
-              <PrintStartEnd label="Dist. & Dir., Obs. Pt. from Emission Pt." start={header.distDirObsStart} end={header.distDirObsEnd} />
-              <PrintStartEnd label="Describe Emissions" start={header.emissionsDescStart} end={header.emissionsDescEnd} />
-              <PrintStartEnd label="Emission Color" start={header.emissionColorStart} end={header.emissionColorEnd} />
-              <div style={{ fontSize: 6.5 }}>
-                <b>Water Droplet Plume:</b>{" "}
-                {["attached", "detached", "none"].map((opt) => (
-                  <span
-                    key={opt}
-                    style={{
-                      marginRight: 6,
-                      textDecoration: header.waterDroplet === opt ? "underline" : "none",
-                      fontWeight: header.waterDroplet === opt ? 700 : 400,
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    {opt}
-                  </span>
-                ))}
-              </div>
-              <PrintStartEnd label="Describe Plume Background" start={header.plumeBgStart} end={header.plumeBgEnd} />
-              <PrintStartEnd label="Background Color" start={header.bgColorStart} end={header.bgColorEnd} />
-              <PrintStartEnd label="Sky Conditions" start={header.skyStart} end={header.skyEnd} />
-              <PrintStartEnd label="Wind Speed" unit="mph" start={header.windSpeedStart} end={header.windSpeedEnd} />
-              <PrintStartEnd label="Wind Direction" start={header.windDirStart} end={header.windDirEnd} />
-              <PrintStartEnd label="Ambient Temp." unit="°F" start={header.ambientTempStart} end={header.ambientTempEnd} />
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="Wet Bulb Temp (°F)" value={header.wetBulbTemp} />
-                <PrintField label="RH %" value={header.rhPercent} />
-              </div>
+        {(() => {
+          const totalPages = Math.max(1, Math.ceil(rows.length / 30));
 
-              <div style={{ border: "1px solid #94a3b8", marginTop: 3, padding: 2 }}>
-                <div style={{ fontSize: 6, fontWeight: 700, marginBottom: 1 }}>SOURCE LAYOUT SKETCH</div>
-                {getSketchImageSrc() ? (
-                  <img src={getSketchImageSrc()} style={{ width: "100%", height: 70, objectFit: "contain" }} alt="" />
-                ) : (
-                  <div style={{ height: 70 }} />
-                )}
-                <div style={{ fontSize: 6 }}>
-                  North reference: {header.northRef === "TN" ? "True North" : "Magnetic North"}
-                </div>
+          const renderPrintPage = ({ pageNum, pageOf, pageRowsStart, pageRowsEnd, showFullDetails, showSummary, pageBreak }) => (
+            <div key={pageNum} style={pageBreak ? { pageBreakBefore: "always" } : undefined}>
+              <div style={{ textAlign: "center", fontWeight: 700, fontSize: 9, marginBottom: 3 }}>
+                EPA VISIBLE EMISSION OBSERVATION FORM 1
               </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                <PrintField label="Longitude" value={header.longitude} />
-                <PrintField label="Latitude" value={header.latitude} />
-                <PrintField label="Declination" value={header.declination} />
-              </div>
-              <PrintField label="Additional Information" value={header.additionalInfo} />
-            </div>
-
-            {/* RIGHT COLUMN */}
-            <div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <PrintField label="Form Number" value={header.formNumber} />
-                <PrintField label="Page" value={header.pageNum} />
-                <PrintField label="Of" value={header.pageOf} />
-              </div>
-              <PrintField label="Continued on VEO Form Number" value={header.continuedOnForm} />
-              <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                <PrintField label="Obs. Date" value={header.obsDate} />
-                <PrintField label="Time Zone" value={header.timeZone} />
-                <PrintField label="Start Time" value={header.startTime} />
-                <PrintField label="End Time" value={header.endTime} />
-              </div>
-              <PrintField label="Opacity Limit (%)" value={opacityLimit} />
-
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 6, marginTop: 2 }}>
-                <thead>
-                  <tr style={{ background: "#1e293b", color: "#ffffff" }}>
-                    <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Min</th>
-                    {SEC_COLS.map((s) => (
-                      <th key={s} style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>
-                        :{String(s).padStart(2, "0")}
-                      </th>
+              <div style={{ display: "grid", gridTemplateColumns: "48% 50%", columnGap: "2%" }}>
+                {/* LEFT COLUMN */}
+                <div>
+                  <div style={{ fontSize: 6.5, marginBottom: 2 }}>
+                    <b>Method Used (Circle One):</b>{" "}
+                    {["Method 9", "203A", "203B", "Other"].map((opt) => (
+                      <span
+                        key={opt}
+                        style={{
+                          marginRight: 6,
+                          textDecoration: header.methodUsed === opt ? "underline" : "none",
+                          fontWeight: header.methodUsed === opt ? 700 : 400,
+                        }}
+                      >
+                        {opt}
+                      </span>
                     ))}
-                    <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Comments</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, r) => (
-                    <tr key={r}>
-                      <td style={{ border: "1px solid #cbd5e1", textAlign: "center", padding: "0.5px 2px" }}>{r + 1}</td>
-                      {row.map((v, c) => (
-                        <td key={c} style={{ border: "1px solid #cbd5e1", textAlign: "center", padding: "0.5px 2px" }}>
-                          {v}
-                        </td>
-                      ))}
-                      <td style={{ border: "1px solid #cbd5e1", padding: "0.5px 2px" }}>{comments[r]}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </div>
+                  <PrintField label="Company Name" value={header.company} />
+                  <PrintField label="Facility Name" value={header.facilityName} />
+                  <PrintField label="Street Address" value={header.streetAddress} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <PrintField label="City" value={header.city} />
+                    <PrintField label="State" value={header.state} />
+                    <PrintField label="Zip" value={header.zip} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <PrintField label="Process" value={header.processEquip} />
+                    <PrintField label="Unit #" value={header.unitNumber} />
+                    <PrintField label="Op. Mode" value={header.processMode} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <PrintField label="Control Equip." value={header.controlEquip} />
+                    <PrintField label="Op. Mode" value={header.controlMode} />
+                  </div>
 
-              <div style={{ display: "flex", gap: 10, fontSize: 6.5, marginTop: 2 }}>
-                <span>
-                  <b>Overall Avg:</b> {overallAverage !== null ? `${overallAverage.toFixed(1)}%` : "–"}
-                </span>
-                <span>
-                  <b>Highest 6-min Avg:</b> {highestBlockAvg !== null ? `${highestBlockAvg.toFixed(1)}%` : "–"}
-                </span>
-              </div>
+                  {showFullDetails && (
+                    <>
+                      <PrintField label="Describe Emission Point" value={header.emissionPointDesc} />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <PrintField label="Height Emiss. Pt (ft)" value={header.heightEmissionPoint} />
+                        <PrintField label="Height Rel. Observer (ft)" value={header.heightRelativeObserver} />
+                      </div>
+                      <PrintStartEnd label="Distance to Emiss. Pt." unit="ft" start={header.distEmissionStart} end={header.distEmissionEnd} />
+                      <PrintStartEnd label="Direction to Emiss. Pt." unit="0–360°" start={header.dirEmissionStart} end={header.dirEmissionEnd} />
+                      <PrintStartEnd label="Vertical Angle to Obs. Pt." unit="°" start={header.vertAngleStart} end={header.vertAngleEnd} />
+                      <PrintStartEnd label="Direction to Obs. Pt." unit="0–360°" start={header.dirObsPointStart} end={header.dirObsPointEnd} />
+                      <PrintStartEnd label="Dist. & Dir., Obs. Pt. from Emission Pt." start={header.distDirObsStart} end={header.distDirObsEnd} />
+                      <PrintStartEnd label="Describe Emissions" start={header.emissionsDescStart} end={header.emissionsDescEnd} />
+                      <PrintStartEnd label="Emission Color" start={header.emissionColorStart} end={header.emissionColorEnd} />
+                      <div style={{ fontSize: 6.5 }}>
+                        <b>Water Droplet Plume:</b>{" "}
+                        {["attached", "detached", "none"].map((opt) => (
+                          <span
+                            key={opt}
+                            style={{
+                              marginRight: 6,
+                              textDecoration: header.waterDroplet === opt ? "underline" : "none",
+                              fontWeight: header.waterDroplet === opt ? 700 : 400,
+                              textTransform: "capitalize",
+                            }}
+                          >
+                            {opt}
+                          </span>
+                        ))}
+                      </div>
+                      <PrintStartEnd label="Describe Plume Background" start={header.plumeBgStart} end={header.plumeBgEnd} />
+                      <PrintStartEnd label="Background Color" start={header.bgColorStart} end={header.bgColorEnd} />
+                      <PrintStartEnd label="Sky Conditions" start={header.skyStart} end={header.skyEnd} />
+                      <PrintStartEnd label="Wind Speed" unit="mph" start={header.windSpeedStart} end={header.windSpeedEnd} />
+                      <PrintStartEnd label="Wind Direction" start={header.windDirStart} end={header.windDirEnd} />
+                      <PrintStartEnd label="Ambient Temp." unit="°F" start={header.ambientTempStart} end={header.ambientTempEnd} />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <PrintField label="Wet Bulb Temp (°F)" value={header.wetBulbTemp} />
+                        <PrintField label="RH %" value={header.rhPercent} />
+                      </div>
 
-              <div style={{ marginTop: 4, borderTop: "1px solid #94a3b8", paddingTop: 2 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <PrintField label="Observer's Name (Print)" value={header.observerName} />
-                  <PrintField label="Organization" value={header.organization} />
+                      <div style={{ border: "1px solid #94a3b8", marginTop: 3, padding: 2 }}>
+                        <div style={{ fontSize: 6, fontWeight: 700, marginBottom: 1 }}>SOURCE LAYOUT SKETCH</div>
+                        {getSketchImageSrc() ? (
+                          <img src={getSketchImageSrc()} style={{ width: "100%", height: 70, objectFit: "contain" }} alt="" />
+                        ) : (
+                          <div style={{ height: 70 }} />
+                        )}
+                        <div style={{ fontSize: 6 }}>
+                          North reference: {header.northRef === "TN" ? "True North" : "Magnetic North"}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        <PrintField label="Longitude" value={header.longitude} />
+                        <PrintField label="Latitude" value={header.latitude} />
+                        <PrintField label="Declination" value={header.declination} />
+                      </div>
+                      <PrintField label="Additional Information" value={header.additionalInfo} />
+                    </>
+                  )}
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <PrintField label="Observer's Signature" value={header.observerSignature} />
-                  <PrintField label="Certified By" value={header.certifiedBy} />
+
+                {/* RIGHT COLUMN */}
+                <div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <PrintField label="Form Number" value={header.formNumber} />
+                    <PrintField label="Page" value={String(pageNum)} />
+                    <PrintField label="Of" value={String(pageOf)} />
+                  </div>
+                  <PrintField label="Continued on VEO Form Number" value={header.continuedOnForm} />
+                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                    <PrintField label="Obs. Date" value={header.obsDate} />
+                    <PrintField label="Time Zone" value={header.timeZone} />
+                    <PrintField label="Start Time" value={header.startTime} />
+                    <PrintField label="End Time" value={header.endTime} />
+                  </div>
+                  <PrintField label="Opacity Limit (%)" value={opacityLimit} />
+
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 6, marginTop: 2 }}>
+                    <thead>
+                      <tr style={{ background: "#1e293b", color: "#ffffff" }}>
+                        <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Min</th>
+                        {SEC_COLS.map((s) => (
+                          <th key={s} style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>
+                            :{String(s).padStart(2, "0")}
+                          </th>
+                        ))}
+                        <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Comments</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(pageRowsStart, pageRowsEnd).map((row, i) => {
+                        const r = pageRowsStart + i;
+                        return (
+                          <tr key={r}>
+                            <td style={{ border: "1px solid #cbd5e1", textAlign: "center", padding: "0.5px 2px" }}>{i + 1}</td>
+                            {row.map((v, c) => (
+                              <td key={c} style={{ border: "1px solid #cbd5e1", textAlign: "center", padding: "0.5px 2px" }}>
+                                {v}
+                              </td>
+                            ))}
+                            <td style={{ border: "1px solid #cbd5e1", padding: "0.5px 2px" }}>{comments[r]}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {showSummary && (
+                    <div style={{ display: "flex", gap: 10, fontSize: 6.5, marginTop: 2 }}>
+                      <span>
+                        <b>Overall Avg:</b> {overallAverage !== null ? `${overallAverage.toFixed(1)}%` : "–"}
+                      </span>
+                      <span>
+                        <b>Highest 6-min Avg:</b> {highestBlockAvg !== null ? `${highestBlockAvg.toFixed(1)}%` : "–"}
+                      </span>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 4, borderTop: "1px solid #94a3b8", paddingTop: 2 }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <PrintField label="Observer's Name (Print)" value={header.observerName} />
+                      <PrintField label="Organization" value={header.organization} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <PrintField label="Observer's Signature" value={header.observerSignature} />
+                      <PrintField label="Certified By" value={header.certifiedBy} />
+                    </div>
+                    <PrintField label="Date" value={header.certifiedDate} />
+                  </div>
                 </div>
-                <PrintField label="Date" value={header.certifiedDate} />
               </div>
             </div>
-          </div>
+          );
+
+          return (
+            <div className="m9-printdoc" style={{ display: "none" }}>
+              {renderPrintPage({
+                pageNum: 1,
+                pageOf: totalPages,
+                pageRowsStart: 0,
+                pageRowsEnd: Math.min(30, rows.length),
+                showFullDetails: true,
+                showSummary: totalPages === 1,
+                pageBreak: false,
+              })}
+              {totalPages > 1 &&
+                renderPrintPage({
+                  pageNum: 2,
+                  pageOf: totalPages,
+                  pageRowsStart: 30,
+                  pageRowsEnd: rows.length,
+                  showFullDetails: false,
+                  showSummary: true,
+                  pageBreak: true,
+                })}
+            </div>
+          );
+        })()}
         </div>
 
         <div
