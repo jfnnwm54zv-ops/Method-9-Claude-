@@ -764,6 +764,19 @@ function Method9App() {
     updateHeader("sketchData", "");
   };
 
+  // The canvas always has content — either just the light-gray template guide,
+  // or the template plus whatever the user drew — since the on-screen effect
+  // draws it regardless of visibility. Pulling straight from the canvas (rather
+  // than only using header.sketchData) means print always matches what's shown
+  // on screen, even before the user has drawn anything.
+  const getSketchImageSrc = () => {
+    try {
+      return canvasRef.current ? canvasRef.current.toDataURL("image/png") : "";
+    } catch (e) {
+      return "";
+    }
+  };
+
   const addSunWindToSketch = (target) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -2064,8 +2077,8 @@ function Method9App() {
 
               <div style={{ border: "1px solid #94a3b8", marginTop: 3, padding: 2 }}>
                 <div style={{ fontSize: 6, fontWeight: 700, marginBottom: 1 }}>SOURCE LAYOUT SKETCH</div>
-                {header.sketchData ? (
-                  <img src={header.sketchData} style={{ width: "100%", height: 70, objectFit: "contain" }} alt="" />
+                {getSketchImageSrc() ? (
+                  <img src={getSketchImageSrc()} style={{ width: "100%", height: 70, objectFit: "contain" }} alt="" />
                 ) : (
                   <div style={{ height: 70 }} />
                 )}
