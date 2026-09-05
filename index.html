@@ -214,6 +214,16 @@ function nowLabel() {
   });
 }
 
+function todayDateStr() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function nowTimeStr() {
+  return new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 // WMO weather codes -> plain-language sky condition, per Open-Meteo's code table
 function wmoToSky(code) {
   const map = {
@@ -676,6 +686,8 @@ function Method9App() {
       setRunning(false);
       accumulatedRef.current = duration * 60 * 1000;
       setStatus(`Stopwatch reached ${duration} minutes — observation period complete`);
+      setHeader((h) => ({ ...h, endTime: h.endTime || nowTimeStr() }));
+      markDirty();
     }
   }, [elapsedSeconds, running, duration, soundOn, playBeep]);
 
@@ -688,6 +700,16 @@ function Method9App() {
       }
       if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
     } catch (e) {}
+    // Only auto-fill on a fresh start (not a resume-from-pause), and only into
+    // fields that are still blank — never overwrite something already entered.
+    if (elapsedSeconds === 0) {
+      setHeader((h) => ({
+        ...h,
+        obsDate: h.obsDate || todayDateStr(),
+        startTime: h.startTime || nowTimeStr(),
+      }));
+      markDirty();
+    }
     startTimeRef.current = Date.now();
     setRunning(true);
   };
@@ -2185,7 +2207,7 @@ function Method9App() {
                   </div>
                   <PrintField label="Opacity Limit (%)" value={opacityLimit} />
 
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 6, marginTop: 2 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 6, marginTop: 1 }}>
                     <thead>
                       <tr style={{ background: "#1e293b", color: "#ffffff" }}>
                         <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Min</th>
@@ -2226,7 +2248,7 @@ function Method9App() {
                     </div>
                   )}
 
-                  <div style={{ marginTop: 4, borderTop: "1px solid #94a3b8", paddingTop: 2 }}>
+                  <div style={{ marginTop: 2, borderTop: "1px solid #94a3b8", paddingTop: 1 }}>
                     <div style={{ display: "flex", gap: 6 }}>
                       <PrintField label="Observer's Name (Print)" value={header.observerName} />
                       <PrintField label="Organization" value={header.organization} />
@@ -2279,7 +2301,7 @@ function Method9App() {
         input, select, textarea, button { font-size: 16px; touch-action: manipulation; }
         table input { font-size: 16px; }
         @media print {
-          @page { size: letter portrait; margin: 0.15in; }
+          @page { size: letter portrait; margin: 0.1in; }
           .m9-editform { display: none !important; }
           .m9-printdoc { display: block !important; }
           .m9-printdoc table tr { page-break-inside: avoid; }
