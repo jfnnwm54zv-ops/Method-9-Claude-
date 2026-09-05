@@ -521,9 +521,9 @@ function StartEnd({ label, startKey, endKey, unit, header, updateHeader }) {
 }
 
 // ---------- dedicated print-only layout (mirrors the real two-column paper form) ----------
-function PrintField({ label, value }) {
+function PrintField({ label, value, grow }) {
   return (
-    <div style={{ display: "flex", gap: 4, fontSize: 6.5, lineHeight: 1.35, padding: "0.5px 0", flex: 1, minWidth: 0 }}>
+    <div style={{ display: "flex", gap: 4, fontSize: 6.5, lineHeight: 1.35, padding: "0.5px 0", flex: grow || 1, minWidth: 0 }}>
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569", whiteSpace: "nowrap" }}>{label}</span>
       <span style={{ borderBottom: "1px solid #cbd5e1", flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
         {value || ""}
@@ -2200,7 +2200,7 @@ function Method9App() {
                   </div>
                   <PrintField label="Continued on VEO Form Number" value={header.continuedOnForm} />
                   <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                    <PrintField label="Obs. Date" value={header.obsDate} />
+                    <PrintField label="Obs. Date" value={header.obsDate} grow={1.6} />
                     <PrintField label="Time Zone" value={header.timeZone} />
                     <PrintField label="Start Time" value={header.startTime} />
                     <PrintField label="End Time" value={header.endTime} />
