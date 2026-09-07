@@ -2200,8 +2200,10 @@ function Method9App() {
                   </div>
                   <PrintField label="Continued on VEO Form Number" value={header.continuedOnForm} />
                   <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                    <PrintField label="Obs. Date" value={header.obsDate} grow={1.6} />
+                    <PrintField label="Obs. Date" value={header.obsDate} />
                     <PrintField label="Time Zone" value={header.timeZone} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 1 }}>
                     <PrintField label="Start Time" value={header.startTime} />
                     <PrintField label="End Time" value={header.endTime} />
                   </div>
@@ -2249,14 +2251,10 @@ function Method9App() {
                   )}
 
                   <div style={{ marginTop: 2, borderTop: "1px solid #94a3b8", paddingTop: 1 }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <PrintField label="Observer's Name (Print)" value={header.observerName} />
-                      <PrintField label="Organization" value={header.organization} />
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <PrintField label="Observer's Signature" value={header.observerSignature} />
-                      <PrintField label="Certified By" value={header.certifiedBy} />
-                    </div>
+                    <PrintField label="Observer's Name (Print)" value={header.observerName} />
+                    <PrintField label="Organization" value={header.organization} />
+                    <PrintField label="Observer's Signature" value={header.observerSignature} />
+                    <PrintField label="Certified By" value={header.certifiedBy} />
                     <PrintField label="Date" value={header.certifiedDate} />
                   </div>
                 </div>
