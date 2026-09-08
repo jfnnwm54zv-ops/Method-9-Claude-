@@ -623,6 +623,13 @@ function Method9App() {
   const [knownDistanceInput, setKnownDistanceInput] = useState("");
   const [emissionLat, setEmissionLat] = useState("");
   const [emissionLng, setEmissionLng] = useState("");
+  const [showMap, setShowMap] = useState(false);
+  const [mapStatus, setMapStatus] = useState("idle"); // idle | loading | ready | error
+  const [mapErrorMsg, setMapErrorMsg] = useState("");
+  const mapContainerRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const youMarkerRef = useRef(null);
+  const pinMarkerRef = useRef(null);
   const [sensorStatus, setSensorStatus] = useState("idle"); // idle | requesting | active | denied | unsupported
   const [liveBeta, setLiveBeta] = useState(null);
   const [zeroBeta, setZeroBeta] = useState(null);
@@ -1037,6 +1044,124 @@ function Method9App() {
     if (gpsBearingDeg === null) return;
     updateHeader(target === "start" ? "dirEmissionStart" : "dirEmissionEnd", String(Math.round(gpsBearingDeg)));
   };
+
+  // ---------- interactive aerial map (tap to drop a pin on the emission point) ----------
+  const initMap = () => {
+    if (leafletMapRef.current) return; // already initialized
+    if (typeof window.L === "undefined") {
+      setMapStatus("error");
+      setMapErrorMsg("Map library didn't load — check your connection and try again.");
+      return;
+    }
+    setMapStatus("loading");
+
+    const startLat = parseFloat(header.latitude) || 0;
+    const startLng = parseFloat(header.longitude) || 0;
+    const map = window.L.map(mapContainerRef.current).setView([startLat, startLng], startLat ? 18 : 3);
+    window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "Tiles &copy; Esri",
+      maxZoom: 20,
+    }).addTo(map);
+
+    map.on("click", (e) => {
+      setEmissionLat(e.latlng.lat.toFixed(6));
+      setEmissionLng(e.latlng.lng.toFixed(6));
+      if (pinMarkerRef.current) {
+        pinMarkerRef.current.setLatLng(e.latlng);
+      } else {
+        pinMarkerRef.current = window.L.marker(e.latlng).addTo(map).bindPopup("Emission point").openPopup();
+      }
+    });
+
+    leafletMapRef.current = map;
+    setMapStatus("ready");
+    centerOnMe();
+  };
+
+  const loadLeafletThenInit = () => {
+    if (typeof window.L !== "undefined") {
+      initMap();
+      return;
+    }
+    setMapStatus("loading");
+    if (!document.getElementById("leaflet-css-m9")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css-m9";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    let script = document.getElementById("leaflet-js-m9");
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "leaflet-js-m9";
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      document.head.appendChild(script);
+    }
+    script.addEventListener("load", () => initMap(), { once: true });
+    script.addEventListener(
+      "error",
+      () => {
+        setMapStatus("error");
+        setMapErrorMsg("Couldn't load the map library from unpkg.com — check your connection and try again.");
+      },
+      { once: true }
+    );
+  };
+
+  const centerOnMe = () => {
+    if (!navigator.geolocation || !leafletMapRef.current) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const map = leafletMapRef.current;
+        map.setView([latitude, longitude], 18);
+        if (youMarkerRef.current) {
+          youMarkerRef.current.setLatLng([latitude, longitude]);
+        } else {
+          youMarkerRef.current = window.L.circleMarker([latitude, longitude], {
+            radius: 8,
+            color: "#2563eb",
+            fillColor: "#3b82f6",
+            fillOpacity: 0.9,
+          })
+            .addTo(map)
+            .bindPopup("You");
+        }
+        // Also keep the form's own Latitude/Longitude fields in sync if they're empty
+        setHeader((h) => ({
+          ...h,
+          latitude: h.latitude || latitude.toFixed(6),
+          longitude: h.longitude || longitude.toFixed(6),
+        }));
+      },
+      () => {
+        setMapErrorMsg("Couldn't get your location — you can still tap the map to drop a pin manually.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const clearPin = () => {
+    if (pinMarkerRef.current && leafletMapRef.current) {
+      leafletMapRef.current.removeLayer(pinMarkerRef.current);
+      pinMarkerRef.current = null;
+    }
+    setEmissionLat("");
+    setEmissionLng("");
+  };
+
+  const toggleMap = () => {
+    setShowMap((v) => !v);
+  };
+
+  useEffect(() => {
+    if (showMap) {
+      // defer init one tick so the container div has been rendered/sized first
+      const t = setTimeout(loadLeafletThenInit, 0);
+      return () => clearTimeout(t);
+    }
+  }, [showMap]);
   useEffect(() => {
     const interval = setInterval(() => {
       saveDraft();
@@ -1780,9 +1905,9 @@ function Method9App() {
               GPS Distance & Direction (from map coordinates)
             </div>
             <div className="text-xs text-slate-500 mb-2">
-              Uses your Latitude/Longitude (below the sketch — fill those in, or use "Get current weather" above to
-              auto-fill them) as your position. Get the emission point's coordinates by dropping a pin on it in
-              Google Maps or Google Earth, then type them in here.
+              Tap the map below to drop a pin right on the emission point — or if you'd rather use Google Maps/Earth,
+              type the coordinates in manually. Either way, this uses your own Latitude/Longitude (below the sketch,
+              or auto-filled via "Get current weather" above) as your position.
             </div>
             {(header.latitude === "" || header.longitude === "") && (
               <div className="text-xs text-amber-700 mb-2">
@@ -1813,7 +1938,46 @@ function Method9App() {
                   className="border border-slate-300 rounded px-2 py-2 sm:py-1 text-sm w-28 focus:outline-none focus:ring-2 focus:ring-amber-400"
                 />
               </div>
+              <button
+                onClick={toggleMap}
+                className="px-3 py-2 sm:py-1 text-xs rounded bg-slate-800 text-stone-100 active:bg-slate-700 sm:hover:bg-slate-700 transition"
+              >
+                {showMap ? "Hide map" : "Or tap it on a map instead"}
+              </button>
             </div>
+
+            {showMap && (
+              <div className="mb-2">
+                {mapStatus === "error" && (
+                  <div className="text-xs text-red-600 mb-1">{mapErrorMsg}</div>
+                )}
+                {mapErrorMsg && mapStatus !== "error" && (
+                  <div className="text-xs text-amber-700 mb-1">{mapErrorMsg}</div>
+                )}
+                <div
+                  ref={mapContainerRef}
+                  className="w-full rounded border border-slate-300"
+                  style={{ height: 260 }}
+                />
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs text-slate-400">Tap the map to drop a pin on the emission point.</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={centerOnMe}
+                      className="px-2 py-1.5 text-xs rounded border border-slate-400 active:bg-slate-200 sm:hover:bg-slate-200 transition"
+                    >
+                      Center on me
+                    </button>
+                    <button
+                      onClick={clearPin}
+                      className="px-2 py-1.5 text-xs rounded border border-slate-400 active:bg-slate-200 sm:hover:bg-slate-200 transition"
+                    >
+                      Clear pin
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-3 mb-2">
               <div className="text-sm">
