@@ -521,11 +521,17 @@ function StartEnd({ label, startKey, endKey, unit, header, updateHeader }) {
 }
 
 // ---------- dedicated print-only layout (mirrors the real two-column paper form) ----------
-function PrintField({ label, value, grow }) {
+function PrintField({ label, value, grow, wrap }) {
   return (
     <div style={{ display: "flex", gap: 4, fontSize: 8.5, lineHeight: 1.4, padding: "1px 0", flex: grow || 1, minWidth: 0 }}>
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569", whiteSpace: "nowrap" }}>{label}</span>
-      <span style={{ borderBottom: "1px solid #cbd5e1", flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+      <span
+        style={
+          wrap
+            ? { borderBottom: "1px solid #cbd5e1", flex: 1, overflowWrap: "break-word", whiteSpace: "normal" }
+            : { borderBottom: "1px solid #cbd5e1", flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }
+        }
+      >
         {value || ""}
       </span>
     </div>
@@ -2119,8 +2125,8 @@ function Method9App() {
                     <PrintField label="State" value={header.state} />
                     <PrintField label="Zip" value={header.zip} />
                   </div>
+                  <PrintField label="Process" value={header.processEquip} />
                   <div style={{ display: "flex", gap: 6 }}>
-                    <PrintField label="Process" value={header.processEquip} />
                     <PrintField label="Unit #" value={header.unitNumber} />
                     <PrintField label="Op. Mode" value={header.processMode} />
                   </div>
@@ -2131,7 +2137,7 @@ function Method9App() {
 
                   {showFullDetails && (
                     <>
-                      <PrintField label="Describe Emission Point" value={header.emissionPointDesc} />
+                      <PrintField label="Describe Emission Point" value={header.emissionPointDesc} wrap />
                       <div style={{ display: "flex", gap: 6 }}>
                         <PrintField label="Height Emiss. Pt (ft)" value={header.heightEmissionPoint} />
                         <PrintField label="Height Rel. Observer (ft)" value={header.heightRelativeObserver} />
@@ -2186,7 +2192,7 @@ function Method9App() {
                         <PrintField label="Latitude" value={header.latitude} />
                         <PrintField label="Declination" value={header.declination} />
                       </div>
-                      <PrintField label="Additional Information" value={header.additionalInfo} />
+                      <PrintField label="Additional Information" value={header.additionalInfo} wrap />
                     </>
                   )}
                 </div>
