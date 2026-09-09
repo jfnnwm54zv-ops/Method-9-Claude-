@@ -374,6 +374,42 @@ function drawSunIcon(ctx, pos, color) {
   }
 }
 
+// ---------- tap-and-place sketch icons ----------
+function drawStackIconAt(ctx, x, y) {
+  ctx.strokeStyle = "#1e293b";
+  ctx.fillStyle = "#1e293b";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x - 4, y - 2, 8, 16);
+  ctx.beginPath();
+  ctx.moveTo(x, y - 2);
+  ctx.quadraticCurveTo(x - 10, y - 16, x - 3, y - 26);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 2, y - 2);
+  ctx.quadraticCurveTo(x + 12, y - 14, x + 5, y - 24);
+  ctx.stroke();
+  ctx.font = "10px sans-serif";
+  ctx.fillText("Stack", x + 10, y + 8);
+}
+
+function drawSunIconAt(ctx, x, y) {
+  drawSunIcon(ctx, { x, y }, "#d97706");
+  ctx.font = "10px sans-serif";
+  ctx.fillStyle = "#92400e";
+  ctx.fillText("Sun", x + 15, y + 4);
+}
+
+function drawWindIconAt(ctx, x, y, directionDeg) {
+  const len = 18;
+  const rad = (directionDeg * Math.PI) / 180;
+  const dx = len * Math.sin(rad);
+  const dy = -len * Math.cos(rad);
+  drawArrowOnCanvas(ctx, { x: x - dx / 2, y: y - dy / 2 }, { x: x + dx / 2, y: y + dy / 2 }, "#2563eb", null);
+  ctx.font = "10px sans-serif";
+  ctx.fillStyle = "#2563eb";
+  ctx.fillText("Wind", x + 12, y + 4);
+}
+
 function drawSketchTemplate(ctx, w, h) {
   const guide = "#94a3b8"; // slate-400, light so it reads as a guide, not user ink
   ctx.strokeStyle = guide;
@@ -548,7 +584,7 @@ function StartEnd({ label, startKey, endKey, unit, header, updateHeader }) {
 // ---------- dedicated print-only layout (mirrors the real two-column paper form) ----------
 function PrintField({ label, value, grow, wrap }) {
   return (
-    <div style={{ display: "flex", gap: 4, fontSize: 10, lineHeight: 1.45, padding: "1.5px 0", flex: grow || 1, minWidth: 0 }}>
+    <div style={{ display: "flex", gap: 4, fontSize: 9, lineHeight: 1.4, padding: "1px 0", flex: grow || 1, minWidth: 0 }}>
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569", whiteSpace: "nowrap" }}>{label}</span>
       <span
         style={
@@ -565,7 +601,7 @@ function PrintField({ label, value, grow, wrap }) {
 
 function PrintStartEnd({ label, unit, start, end }) {
   return (
-    <div style={{ fontSize: 10, lineHeight: 1.45, padding: "1.5px 0" }}>
+    <div style={{ fontSize: 9, lineHeight: 1.4, padding: "1px 0" }}>
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569" }}>
         {label}
         {unit ? ` (${unit})` : ""}
@@ -612,10 +648,10 @@ function Method9App() {
   const lastBeepIndexRef = useRef(-1);
   const rowRefs = useRef([]);
 
-  // ---------- source layout sketch ----------
+  // ---------- source layout sketch (tap-and-place icons) ----------
   const canvasRef = useRef(null);
-  const isDrawingRef = useRef(false);
-  const lastPointRef = useRef({ x: 0, y: 0 });
+  const [sketchItems, setSketchItems] = useState([]);
+  const [activeSketchTool, setActiveSketchTool] = useState(null); // "stack" | "sun" | "wind" | null
 
   // ---------- distance & angle helper ----------
   const [heightInput, setHeightInput] = useState("");
@@ -636,7 +672,7 @@ function Method9App() {
   const orientationListenerRef = useRef(null);
 
   const stateRef = useRef();
-  stateRef.current = { header, duration, rows, comments, opacityLimit, sessionId, sessionLabel };
+  stateRef.current = { header, duration, rows, comments, opacityLimit, sessionId, sessionLabel, sketchItems };
 
   // ---------- load draft + index on mount ----------
   useEffect(() => {
@@ -652,6 +688,7 @@ function Method9App() {
           setOpacityLimit(d.opacityLimit ?? "20");
           setSessionId(d.sessionId ?? null);
           setSessionLabel(d.sessionLabel ?? "");
+          setSketchItems(Array.isArray(d.sketchItems) ? d.sketchItems : []);
           setStatus("Restored unsaved work from last session");
           setRestoredDraft(true);
         } catch (e) {
@@ -787,21 +824,23 @@ function Method9App() {
     }
   }, [activeReading.row, running]);
 
-  // ---------- source layout sketch ----------
+  // ---------- source layout sketch (tap-and-place icons) ----------
+  // sketchItems is the source of truth: an array of {id, type, x, y, deg?}.
+  // The canvas is always just a redraw of template + these items — no freehand
+  // strokes to accumulate, so it's simple to persist, restore, and edit later.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (header.sketchData) {
-      const img = new Image();
-      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      img.src = header.sketchData;
-    } else {
-      drawSketchTemplate(ctx, canvas.width, canvas.height);
-    }
-  }, [header.sketchData]);
+    drawSketchTemplate(ctx, canvas.width, canvas.height);
+    sketchItems.forEach((item) => {
+      if (item.type === "stack") drawStackIconAt(ctx, item.x, item.y);
+      else if (item.type === "sun") drawSunIconAt(ctx, item.x, item.y);
+      else if (item.type === "wind") drawWindIconAt(ctx, item.x, item.y, item.deg || 0);
+    });
+  }, [sketchItems]);
 
   const getCanvasPos = (e) => {
     const canvas = canvasRef.current;
@@ -811,42 +850,50 @@ function Method9App() {
     return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
   };
 
-  const handleSketchPointerDown = (e) => {
-    isDrawingRef.current = true;
-    lastPointRef.current = getCanvasPos(e);
-  };
-
-  const handleSketchPointerMove = (e) => {
-    if (!isDrawingRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
+  // Tap with a tool selected: place that icon. Tap with no tool selected: remove
+  // whichever placed icon is closest to the tap, if any is close enough.
+  const handleCanvasTap = (e) => {
     const pos = getCanvasPos(e);
-    ctx.strokeStyle = "#1e293b";
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-    lastPointRef.current = pos;
-  };
-
-  const finishSketchStroke = () => {
-    if (!isDrawingRef.current) return;
-    isDrawingRef.current = false;
-    const canvas = canvasRef.current;
-    updateHeader("sketchData", canvas.toDataURL("image/png"));
+    if (activeSketchTool) {
+      const deg =
+        activeSketchTool === "wind"
+          ? parseLeadingNumber(header.windDirEnd) ?? parseLeadingNumber(header.windDirStart) ?? 0
+          : undefined;
+      setSketchItems((items) => [
+        ...items,
+        { id: Date.now() + Math.random(), type: activeSketchTool, x: pos.x, y: pos.y, deg },
+      ]);
+      markDirty();
+    } else {
+      setSketchItems((items) => {
+        const threshold = 22;
+        let closestIdx = -1;
+        let closestDist = threshold;
+        items.forEach((item, idx) => {
+          const d = Math.hypot(item.x - pos.x, item.y - pos.y);
+          if (d < closestDist) {
+            closestDist = d;
+            closestIdx = idx;
+          }
+        });
+        if (closestIdx === -1) return items;
+        const next = items.slice();
+        next.splice(closestIdx, 1);
+        return next;
+      });
+      markDirty();
+    }
   };
 
   const clearSketch = () => {
-    updateHeader("sketchData", "");
+    setSketchItems([]);
+    markDirty();
   };
 
   // The canvas always has content — either just the light-gray template guide,
-  // or the template plus whatever the user drew — since the on-screen effect
-  // draws it regardless of visibility. Pulling straight from the canvas (rather
-  // than only using header.sketchData) means print always matches what's shown
-  // on screen, even before the user has drawn anything.
+  // or the template plus whatever's been placed — since the redraw effect runs
+  // regardless of visibility. Pulling straight from the canvas (rather than a
+  // separately-stored image) means print always matches what's shown on screen.
   const getSketchImageSrc = () => {
     try {
       return canvasRef.current ? canvasRef.current.toDataURL("image/png") : "";
@@ -873,7 +920,6 @@ function Method9App() {
     const dateForCalc = weatherState[target].fetchedAt ? new Date(weatherState[target].fetchedAt) : new Date();
     const sun = computeSunAzimuth(dateForCalc, coords.lat, coords.lon);
 
-    const ctx = canvas.getContext("2d");
     const anchor = { x: canvas.width / 2, y: canvas.height / 2 };
     const radius = Math.min(canvas.width, canvas.height) * 0.32;
     const toXY = (azDeg, r) => ({
@@ -881,48 +927,24 @@ function Method9App() {
       y: anchor.y - r * Math.cos((azDeg * Math.PI) / 180),
     });
 
-    // faint "north = up" reference so the overlay's meaning is clear
-    ctx.strokeStyle = "#94a3b8";
-    ctx.setLineDash([2, 2]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(anchor.x, anchor.y);
-    ctx.lineTo(anchor.x, anchor.y - radius - 14);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#64748b";
-    ctx.font = "11px sans-serif";
-    ctx.fillText("N", anchor.x + 4, anchor.y - radius - 16);
-
-    // wind arrow
     const windTip = toXY(windAz, radius);
-    drawArrowOnCanvas(ctx, anchor, windTip, "#2563eb", `WIND ${Math.round(windAz)}°`);
-
-    // sun line + icon
     const sunTip = toXY(sun.azimuthDeg, radius * 0.85);
-    ctx.strokeStyle = "#d97706";
-    ctx.setLineDash([4, 3]);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(anchor.x, anchor.y);
-    ctx.lineTo(sunTip.x, sunTip.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    drawSunIcon(ctx, sunTip, "#d97706");
-    ctx.fillStyle = "#92400e";
-    ctx.font = "11px sans-serif";
-    ctx.fillText(`SUN ${Math.round(sun.azimuthDeg)}°`, sunTip.x + 8, sunTip.y + 4);
+
+    setSketchItems((items) => [
+      ...items,
+      { id: Date.now() + Math.random(), type: "wind", x: windTip.x, y: windTip.y, deg: windAz },
+      { id: Date.now() + Math.random() + 1, type: "sun", x: sunTip.x, y: sunTip.y },
+    ]);
+    markDirty();
 
     // sun check against direction-to-emission-point (140° sector rule)
     const dirStr = target === "start" ? header.dirEmissionStart : header.dirEmissionEnd;
     const dirAz = parseLeadingNumber(dirStr);
-    let caption = `${target === "start" ? "Start" : "End"}: wind ${Math.round(windAz)}°, sun ${Math.round(sun.azimuthDeg)}°`;
 
     if (dirAz !== null) {
       const behindAz = (dirAz + 180) % 360;
       const diff = Math.abs(((sun.azimuthDeg - behindAz + 540) % 360) - 180);
       const pass = diff <= 70;
-      caption += ` — sun check ${pass ? "OK" : "CHECK"} (Δ${Math.round(diff)}°)`;
       setStatus(
         pass
           ? `Sun check (${target}) OK — sun is ${Math.round(diff)}° off directly-behind-you.`
@@ -931,14 +953,6 @@ function Method9App() {
     } else {
       setStatus(`Added sun & wind for "${target}" to the sketch. Enter Direction to Emission Point to also run the sun check.`);
     }
-
-    ctx.fillStyle = "#334155";
-    ctx.font = "10px sans-serif";
-    const captionY = target === "start" ? canvas.height - 8 : canvas.height - 20;
-    ctx.fillText(caption, 6, captionY);
-
-    updateHeader("sketchData", canvas.toDataURL("image/png"));
-    markDirty();
   };
 
   // ---------- distance & angle helper (height / tan(angle) method) ----------
@@ -1180,6 +1194,7 @@ function Method9App() {
       opacityLimit: s.opacityLimit,
       sessionId: s.sessionId,
       sessionLabel: s.sessionLabel,
+      sketchItems: s.sketchItems,
       savedAt: Date.now(),
     });
     const ok = await storageSet(DRAFT_KEY, payload);
@@ -1406,6 +1421,7 @@ function Method9App() {
       rows,
       comments,
       opacityLimit,
+      sketchItems,
       savedAt: Date.now(),
     };
     const ok = await storageSet(`session-${id}`, JSON.stringify(record));
@@ -1446,6 +1462,7 @@ function Method9App() {
       setOpacityLimit(d.opacityLimit ?? "20");
       setSessionId(d.id);
       setSessionLabel(d.label);
+      setSketchItems(Array.isArray(d.sketchItems) ? d.sketchItems : []);
       setShowLoadPanel(false);
       setDirty(false);
       setStatus(`Loaded "${d.label}"`);
@@ -1475,6 +1492,7 @@ function Method9App() {
     setOpacityLimit("20");
     setSessionId(null);
     setSessionLabel("");
+    setSketchItems([]);
     setDirty(false);
     setStatus("Started a new reading — site info carried over");
     handleStopwatchReset();
@@ -1491,6 +1509,7 @@ function Method9App() {
     setOpacityLimit("20");
     setSessionId(null);
     setSessionLabel("Example (Ascend Performance Materials)");
+    setSketchItems([]);
     setDirty(false);
     setStatus("Loaded the example reading from the real submitted form");
     handleStopwatchReset();
@@ -2316,19 +2335,39 @@ function Method9App() {
               </div>
             </div>
             <div className="text-xs text-slate-400 mb-2 print:hidden">
-              The layout guide (observation point line, 140° sun sector, north-arrow circle, side-view box, legend) is
-              already drawn in light gray, same as the paper form. Trace over it with your finger to mark the actual
-              stack, plume, and distances for this reading. The buttons below add a computed sun + wind overlay from
-              your captured weather data — assumes north is up on the canvas.
+              The layout guide (observation point line, 140° sun sector, north-arrow circle, side-view box) is already
+              drawn in light gray. Tap a symbol below, then tap the canvas to place it. With no symbol selected,
+              tapping an existing icon removes it.
             </div>
+            <div className="flex gap-2 mb-2 print:hidden">
+              {[
+                { key: "stack", label: "Stack" },
+                { key: "sun", label: "Sun" },
+                { key: "wind", label: "Wind" },
+              ].map((tool) => (
+                <button
+                  key={tool.key}
+                  onClick={() => setActiveSketchTool((t) => (t === tool.key ? null : tool.key))}
+                  className={`flex-1 px-3 py-2 text-xs rounded border transition ${
+                    activeSketchTool === tool.key
+                      ? "bg-amber-500 border-amber-500 text-slate-900 font-semibold"
+                      : "bg-white border-slate-300 text-slate-700 active:bg-slate-100 sm:hover:bg-slate-100"
+                  }`}
+                >
+                  {tool.label}
+                </button>
+              ))}
+            </div>
+            {activeSketchTool && (
+              <div className="text-xs text-amber-700 mb-2 print:hidden">
+                Tap the canvas to place a {activeSketchTool} icon. Tap "{activeSketchTool}" again to stop placing.
+              </div>
+            )}
             <canvas
               ref={canvasRef}
               width={640}
               height={360}
-              onPointerDown={handleSketchPointerDown}
-              onPointerMove={handleSketchPointerMove}
-              onPointerUp={finishSketchStroke}
-              onPointerLeave={finishSketchStroke}
+              onClick={handleCanvasTap}
               className="w-full h-56 sm:h-64 border border-slate-300 rounded bg-white touch-none m9-sketch-canvas"
               style={{ touchAction: "none" }}
             />
@@ -2403,13 +2442,13 @@ function Method9App() {
 
           const renderPrintPage = ({ pageNum, pageOf, pageRowsStart, pageRowsEnd, showFullDetails, showSummary, pageBreak }) => (
             <div key={pageNum} style={pageBreak ? { pageBreakBefore: "always" } : undefined}>
-              <div style={{ textAlign: "center", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>
+              <div style={{ textAlign: "center", fontWeight: 700, fontSize: 12, marginBottom: 4 }}>
                 EPA VISIBLE EMISSION OBSERVATION FORM 1
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "48% 50%", columnGap: "2%" }}>
                 {/* LEFT COLUMN */}
                 <div>
-                  <div style={{ fontSize: 10, marginBottom: 4 }}>
+                  <div style={{ fontSize: 9, marginBottom: 3 }}>
                     <b>Method Used (Circle One):</b>{" "}
                     {["Method 9", "203A", "203B", "Other"].map((opt) => (
                       <span
@@ -2454,7 +2493,7 @@ function Method9App() {
                       <PrintStartEnd label="Dist. & Dir., Obs. Pt. from Emission Pt." start={header.distDirObsStart} end={header.distDirObsEnd} />
                       <PrintStartEnd label="Describe Emissions" start={header.emissionsDescStart} end={header.emissionsDescEnd} />
                       <PrintStartEnd label="Emission Color" start={header.emissionColorStart} end={header.emissionColorEnd} />
-                      <div style={{ fontSize: 10 }}>
+                      <div style={{ fontSize: 9 }}>
                         <b>Water Droplet Plume:</b>{" "}
                         {["attached", "detached", "none"].map((opt) => (
                           <span
@@ -2482,13 +2521,13 @@ function Method9App() {
                       </div>
 
                       <div style={{ border: "1px solid #94a3b8", marginTop: 3, padding: 2 }}>
-                        <div style={{ fontSize: 9.5, fontWeight: 700, marginBottom: 3 }}>SOURCE LAYOUT SKETCH</div>
+                        <div style={{ fontSize: 8.5, fontWeight: 700, marginBottom: 2 }}>SOURCE LAYOUT SKETCH</div>
                         {getSketchImageSrc() ? (
-                          <img src={getSketchImageSrc()} style={{ width: "100%", height: 130, objectFit: "contain" }} alt="" />
+                          <img src={getSketchImageSrc()} style={{ width: "100%", height: 110, objectFit: "contain" }} alt="" />
                         ) : (
-                          <div style={{ height: 130 }} />
+                          <div style={{ height: 110 }} />
                         )}
-                        <div style={{ fontSize: 9.5 }}>
+                        <div style={{ fontSize: 8.5 }}>
                           North reference: {header.northRef === "TN" ? "True North" : "Magnetic North"}
                         </div>
                       </div>
@@ -2520,7 +2559,7 @@ function Method9App() {
                   </div>
                   <PrintField label="Opacity Limit (%)" value={opacityLimit} />
 
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9.5, marginTop: 3 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 8.5, marginTop: 2 }}>
                     <thead>
                       <tr style={{ background: "#1e293b", color: "#ffffff" }}>
                         <th style={{ border: "1px solid #94a3b8", padding: "0.5px 2px" }}>Min</th>
@@ -2551,7 +2590,7 @@ function Method9App() {
                   </table>
 
                   {showSummary && (
-                    <div style={{ display: "flex", gap: 16, fontSize: 10, marginTop: 4 }}>
+                    <div style={{ display: "flex", gap: 14, fontSize: 9, marginTop: 3 }}>
                       <span>
                         <b>Overall Avg:</b> {overallAverage !== null ? `${overallAverage.toFixed(1)}%` : "–"}
                       </span>
@@ -2610,7 +2649,7 @@ function Method9App() {
         input, select, textarea, button { font-size: 16px; touch-action: manipulation; }
         table input { font-size: 16px; }
         @media print {
-          @page { size: letter portrait; margin: 0.25in; }
+          @page { size: letter portrait; margin: 0.15in; }
           .m9-editform { display: none !important; }
           .m9-printdoc { display: block !important; }
           .m9-printdoc table tr { page-break-inside: avoid; }
