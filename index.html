@@ -994,6 +994,17 @@ function Method9App() {
 
   useEffect(() => stopCamera, [stopCamera]); // release the camera on unmount
 
+  // Runs after cameraStatus flips to "active", which is when the <video>
+  // element actually mounts (it's conditionally rendered) — so this is the
+  // correct place to attach the already-acquired stream, not inline in
+  // startCamera where the element wouldn't exist yet.
+  useEffect(() => {
+    if (cameraStatus === "active" && videoRef.current && cameraStreamRef.current) {
+      videoRef.current.srcObject = cameraStreamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [cameraStatus]);
+
   const startCamera = async () => {
     setCameraStatus("requesting");
     setCameraError("");
@@ -1008,10 +1019,10 @@ function Method9App() {
         audio: false,
       });
       cameraStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // Don't touch videoRef here — the <video> element only renders once
+      // cameraStatus becomes "active", so it doesn't exist in the DOM yet at
+      // this point. Attaching the stream happens in the effect below, which
+      // runs after that render has actually mounted the element.
       setCameraStatus("active");
     } catch (e) {
       setCameraStatus("error");
