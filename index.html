@@ -584,13 +584,24 @@ function StartEnd({ label, startKey, endKey, unit, header, updateHeader }) {
 // ---------- dedicated print-only layout (mirrors the real two-column paper form) ----------
 function PrintField({ label, value, grow, wrap }) {
   return (
-    <div style={{ display: "flex", gap: 4, fontSize: 9, lineHeight: 1.4, padding: "1px 0", flex: grow || 1, minWidth: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        gap: 4,
+        fontSize: 9,
+        lineHeight: 1.4,
+        padding: "1px 4px",
+        flex: grow || 1,
+        minWidth: 0,
+        border: "1px solid #1e293b",
+      }}
+    >
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569", whiteSpace: "nowrap" }}>{label}</span>
       <span
         style={
           wrap
-            ? { borderBottom: "1px solid #cbd5e1", flex: 1, overflowWrap: "break-word", whiteSpace: "normal" }
-            : { borderBottom: "1px solid #cbd5e1", flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }
+            ? { flex: 1, overflowWrap: "break-word", whiteSpace: "normal" }
+            : { flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }
         }
       >
         {value || ""}
@@ -601,7 +612,7 @@ function PrintField({ label, value, grow, wrap }) {
 
 function PrintStartEnd({ label, unit, start, end }) {
   return (
-    <div style={{ fontSize: 9, lineHeight: 1.4, padding: "1px 0" }}>
+    <div style={{ fontSize: 9, lineHeight: 1.4, padding: "1px 4px", border: "1px solid #1e293b" }}>
       <span style={{ fontWeight: 700, textTransform: "uppercase", color: "#475569" }}>
         {label}
         {unit ? ` (${unit})` : ""}
@@ -670,6 +681,10 @@ function Method9App() {
   const [liveBeta, setLiveBeta] = useState(null);
   const [zeroBeta, setZeroBeta] = useState(null);
   const orientationListenerRef = useRef(null);
+  const [cameraStatus, setCameraStatus] = useState("idle"); // idle | requesting | active | denied | error
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
 
   const stateRef = useRef();
   stateRef.current = { header, duration, rows, comments, opacityLimit, sessionId, sessionLabel, sketchItems };
@@ -964,6 +979,49 @@ function Method9App() {
   }, []);
 
   useEffect(() => stopTiltSensor, [stopTiltSensor]); // stop listening on unmount
+
+  // Camera is a visual aiming aid only — it doesn't measure anything itself,
+  // it just lets you see you're actually sighting the top of the stack while
+  // the tilt sensor (below) captures the real angle.
+  const stopCamera = useCallback(() => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraStatus("idle");
+  }, []);
+
+  useEffect(() => stopCamera, [stopCamera]); // release the camera on unmount
+
+  const startCamera = async () => {
+    setCameraStatus("requesting");
+    setCameraError("");
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraStatus("error");
+        setCameraError("Camera isn't available in this browser.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraStatus("active");
+    } catch (e) {
+      setCameraStatus("error");
+      setCameraError(
+        e && e.name === "NotAllowedError"
+          ? "Camera permission denied — you can still use the tilt sensor without it."
+          : "Couldn't start the camera — you can still use the tilt sensor without it."
+      );
+    }
+  };
 
   const startTiltSensor = async () => {
     setSensorStatus("requesting");
@@ -1836,6 +1894,46 @@ function Method9App() {
               </div>
             )}
 
+            <div className="flex items-center gap-2 mb-2">
+              {cameraStatus !== "active" ? (
+                <button
+                  onClick={startCamera}
+                  className="px-3 py-2 text-xs rounded border border-slate-400 active:bg-slate-200 sm:hover:bg-slate-200 transition"
+                >
+                  {cameraStatus === "requesting" ? "Requesting…" : "Use camera to aim"}
+                </button>
+              ) : (
+                <button
+                  onClick={stopCamera}
+                  className="px-3 py-2 text-xs rounded border border-slate-400 active:bg-slate-200 sm:hover:bg-slate-200 transition"
+                >
+                  Stop camera
+                </button>
+              )}
+              <span className="text-xs text-slate-400">Optional — just a visual aid, the tilt sensor above does the actual measuring.</span>
+            </div>
+            {cameraStatus === "error" && <div className="text-xs text-red-600 mb-2">{cameraError}</div>}
+            {cameraStatus === "active" && (
+              <div className="relative w-full mb-2 rounded overflow-hidden border border-slate-400" style={{ height: 220 }}>
+                <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+                <div
+                  className="absolute rounded-full border-2 border-white"
+                  style={{ width: 56, height: 56, left: "50%", top: "50%", transform: "translate(-50%, -50%)", boxShadow: "0 0 0 1px rgba(0,0,0,0.4)" }}
+                />
+                <div
+                  className="absolute bg-white"
+                  style={{ width: 2, height: 20, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                />
+                <div
+                  className="absolute bg-white"
+                  style={{ width: 20, height: 2, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                />
+                <div className="absolute bottom-1 left-1 right-1 text-center text-xs text-white bg-black/50 rounded py-0.5">
+                  Sight the top of the stack in the circle, then tap "Capture angle" above
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-sm">
                 <span className="text-slate-500">Estimated distance: </span>
@@ -2448,7 +2546,7 @@ function Method9App() {
               <div style={{ display: "grid", gridTemplateColumns: "48% 50%", columnGap: "2%" }}>
                 {/* LEFT COLUMN */}
                 <div>
-                  <div style={{ fontSize: 9, marginBottom: 3 }}>
+                  <div style={{ fontSize: 9, marginBottom: 3, padding: "1px 4px", border: "1px solid #1e293b" }}>
                     <b>Method Used (Circle One):</b>{" "}
                     {["Method 9", "203A", "203B", "Other"].map((opt) => (
                       <span
@@ -2466,17 +2564,17 @@ function Method9App() {
                   <PrintField label="Company Name" value={header.company} />
                   <PrintField label="Facility Name" value={header.facilityName} />
                   <PrintField label="Street Address" value={header.streetAddress} />
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 2 }}>
                     <PrintField label="City" value={header.city} />
                     <PrintField label="State" value={header.state} />
                     <PrintField label="Zip" value={header.zip} />
                   </div>
                   <PrintField label="Process" value={header.processEquip} />
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 2 }}>
                     <PrintField label="Unit #" value={header.unitNumber} />
                     <PrintField label="Op. Mode" value={header.processMode} />
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 2 }}>
                     <PrintField label="Control Equip." value={header.controlEquip} />
                     <PrintField label="Op. Mode" value={header.controlMode} />
                   </div>
@@ -2493,7 +2591,7 @@ function Method9App() {
                       <PrintStartEnd label="Dist. & Dir., Obs. Pt. from Emission Pt." start={header.distDirObsStart} end={header.distDirObsEnd} />
                       <PrintStartEnd label="Describe Emissions" start={header.emissionsDescStart} end={header.emissionsDescEnd} />
                       <PrintStartEnd label="Emission Color" start={header.emissionColorStart} end={header.emissionColorEnd} />
-                      <div style={{ fontSize: 9 }}>
+                      <div style={{ fontSize: 9, padding: "1px 4px", border: "1px solid #1e293b" }}>
                         <b>Water Droplet Plume:</b>{" "}
                         {["attached", "detached", "none"].map((opt) => (
                           <span
@@ -2515,12 +2613,12 @@ function Method9App() {
                       <PrintStartEnd label="Wind Speed" unit="mph" start={header.windSpeedStart} end={header.windSpeedEnd} />
                       <PrintStartEnd label="Wind Direction" start={header.windDirStart} end={header.windDirEnd} />
                       <PrintStartEnd label="Ambient Temp." unit="°F" start={header.ambientTempStart} end={header.ambientTempEnd} />
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 2 }}>
                         <PrintField label="Wet Bulb Temp (°F)" value={header.wetBulbTemp} />
                         <PrintField label="RH %" value={header.rhPercent} />
                       </div>
 
-                      <div style={{ border: "1px solid #94a3b8", marginTop: 3, padding: 2 }}>
+                      <div style={{ border: "1px solid #1e293b", marginTop: 3, padding: 2 }}>
                         <div style={{ fontSize: 8.5, fontWeight: 700, marginBottom: 2 }}>SOURCE LAYOUT SKETCH</div>
                         {getSketchImageSrc() ? (
                           <img src={getSketchImageSrc()} style={{ width: "100%", height: 110, objectFit: "contain" }} alt="" />
@@ -2531,7 +2629,7 @@ function Method9App() {
                           North reference: {header.northRef === "TN" ? "True North" : "Magnetic North"}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                      <div style={{ display: "flex", gap: 2, marginTop: 2 }}>
                         <PrintField label="Longitude" value={header.longitude} />
                         <PrintField label="Latitude" value={header.latitude} />
                         <PrintField label="Declination" value={header.declination} />
@@ -2543,17 +2641,17 @@ function Method9App() {
 
                 {/* RIGHT COLUMN */}
                 <div>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 2 }}>
                     <PrintField label="Form Number" value={header.formNumber} />
                     <PrintField label="Page" value={String(pageNum)} />
                     <PrintField label="Of" value={String(pageOf)} />
                   </div>
                   <PrintField label="Continued on VEO Form Number" value={header.continuedOnForm} />
-                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                  <div style={{ display: "flex", gap: 2, marginTop: 2 }}>
                     <PrintField label="Obs. Date" value={header.obsDate} />
                     <PrintField label="Time Zone" value={header.timeZone} />
                   </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 1 }}>
+                  <div style={{ display: "flex", gap: 2, marginTop: 1 }}>
                     <PrintField label="Start Time" value={header.startTime} />
                     <PrintField label="End Time" value={header.endTime} />
                   </div>
@@ -2590,7 +2688,16 @@ function Method9App() {
                   </table>
 
                   {showSummary && (
-                    <div style={{ display: "flex", gap: 14, fontSize: 9, marginTop: 3 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 14,
+                        fontSize: 9,
+                        marginTop: 3,
+                        padding: "1px 4px",
+                        border: "1px solid #1e293b",
+                      }}
+                    >
                       <span>
                         <b>Overall Avg:</b> {overallAverage !== null ? `${overallAverage.toFixed(1)}%` : "–"}
                       </span>
